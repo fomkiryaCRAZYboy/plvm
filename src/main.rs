@@ -1,13 +1,12 @@
 use std::ffi::CString;
 use std::io::{self, BufRead, Write};
-use std::os::raw::{c_char};
+use std::os::raw::c_char;
+use std::process::ExitCode;
 
-use::std::process::ExitCode;
+mod ast;
+mod ffi;
 
-unsafe extern "C"   /* main.c:125 bool interprete(char * program);*/
-{
-    fn interprete(program: *mut c_char) -> bool;
-}
+//use ffi::{atexit_registration, get_ast, convert_program};
 
 fn read_interactive() -> CString {
     let stdin = io::stdin();
@@ -37,11 +36,22 @@ fn read_interactive() -> CString {
 }
 
 fn main() -> ExitCode {
+    let res = unsafe { atexit_registration() };
+    if res == -1 {
+        eprintln!("atexit_registration error");
+        return ExitCode::FAILURE;
+    }
+
     let code = read_interactive();
 
-    match unsafe { interprete(code.as_ptr() as *mut c_char) } 
-    {
-        true  =>  { ExitCode::SUCCESS }
-        false =>  { ExitCode::FAILURE }
+    let ast_ptr = unsafe { get_ast(code.as_ptr() as *mut c_char) };
+    if ast_ptr.is_null() {
+        eprintln!("err: get_ast returned NULL");
+        return ExitCode::FAILURE;
     }
+
+    let program = unsafe { convert_program(ast_ptr) };
+    println!("{:#?}", program);
+
+    ExitCode::SUCCESS
 }

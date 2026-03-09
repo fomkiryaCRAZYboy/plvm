@@ -3,10 +3,19 @@ use std::io::{self, BufRead, Write};
 use std::os::raw::c_char;
 use std::process::ExitCode;
 
-mod ast;
-mod ffi;
+mod jit;
+mod bytecode_gen;
 
-//use ffi::{atexit_registration, get_ast, convert_program};
+mod ast; /* ast types converted from from pli/include/parser.h */
+
+mod ffi; /* 
+          * declarations of necessary c-functions
+          * conversion a ast_ptr (c-pointer) to Program type (ast.rs)
+          */
+
+use ffi::{ atexit_registration, get_ast, convert_program, emergency_cleanup };
+use ast::Program;
+use jit::{ jit_compile, JitFn };
 
 fn read_interactive() -> CString {
     let stdin = io::stdin();
@@ -44,14 +53,22 @@ fn main() -> ExitCode {
 
     let code = read_interactive();
 
+    /* getting raw pointer leading to c-ast */
     let ast_ptr = unsafe { get_ast(code.as_ptr() as *mut c_char) };
     if ast_ptr.is_null() {
         eprintln!("err: get_ast returned NULL");
         return ExitCode::FAILURE;
     }
 
-    let program = unsafe { convert_program(ast_ptr) };
+    /* converting ast from raw c-pointer to Program type */
+    let program: Program = unsafe { convert_program(ast_ptr) };
+
+    /* clearing all c-memory allocated for c-token-stream and c-ast */
+    unsafe { emergency_cleanup() } ;
+
     println!("{:#?}", program);
+    println!("==================================");
+    println!("{:?}", program);
 
     ExitCode::SUCCESS
 }

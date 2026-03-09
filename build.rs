@@ -6,6 +6,7 @@ fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let pli_src = out_dir.join("PLI");
     let pli_build = pli_src.join("build");
+    let pli_include = pli_src.join("include");
 
     if !pli_src.exists() {
         let status = Command::new("git")
@@ -37,7 +38,20 @@ fn main() {
         .expect("failed to run cmake build");
     assert!(status.success(), "cmake build failed");
 
+    /* generate Rust bindings from C parser.h */
+    let bindings = bindgen::Builder::default()
+        .header("wrapper.h")
+        .clang_arg(format!("-I{}", pli_include.display()))
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .generate()
+        .expect("Unable to generate bindings");
+
+    bindings
+        .write_to_file(out_dir.join("c_ast_binds.rs"))
+        .expect("Couldn't write bindings!");
+
     println!("cargo:rustc-link-search=native={}", pli_build.join("lib").display());
     println!("cargo:rustc-link-lib=static=pli");
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=wrapper.h");
 }

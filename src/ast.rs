@@ -1,6 +1,8 @@
 pub const MAX_STR_SIZE: usize = 64;
 pub const MAX_VAR_SIZE: usize = 64;
 
+/* converted types from pli/include/parser.h */
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BinaryOp {
     And,

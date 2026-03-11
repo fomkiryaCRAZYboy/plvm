@@ -4,9 +4,13 @@ use std::os::raw::c_char;
 use std::process::ExitCode;
 
 mod jit;
+use jit::{ jit_compile, JitFn };
+
 mod bytecode_gen;
+use bytecode_gen::{ Generator , ByteCode };
 
 mod ast; /* ast types converted from from pli/include/parser.h */
+use ast::Program;
 
 mod ffi; /* 
           * declarations of necessary c-functions
@@ -14,8 +18,6 @@ mod ffi; /*
           */
 
 use ffi::{ atexit_registration, get_ast, convert_program, emergency_cleanup };
-use ast::Program;
-use jit::{ jit_compile, JitFn };
 
 fn read_interactive() -> CString {
     let stdin = io::stdin();
@@ -66,9 +68,11 @@ fn main() -> ExitCode {
     /* clearing all c-memory allocated for c-token-stream and c-ast */
     unsafe { emergency_cleanup() } ;
 
-    println!("{:#?}", program);
-    println!("==================================");
-    println!("{:?}", program);
+    let mut gener = Generator::new();
+    gener.generate_bytecode(program);
+
+    let bytecode = gener.finish();
+    println!("{:#?}", bytecode);
 
     ExitCode::SUCCESS
 }

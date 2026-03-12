@@ -16,20 +16,88 @@ macro_rules! redecl {
     };
 }
 
+use crate::ast:: { LiteralValue, Program, Stmt, Stmt::VarDecl, Expr, Expr::Binary, BinaryOp ,BinaryOp::*, UnaryOp, UnaryOp::* };
+
+macro_rules! simple_exp {
+    ($e: expr) => {
+        matches!($e, Expr::Literal { .. } | Expr::Variable { .. })
+    };
+}
+
+macro_rules! heavy_exp {
+    ($e: expr) => {
+        matches!($e, Expr::Grouping { .. } | Expr::Unary { .. } | Expr::Binary { .. })
+    };
+}
+
+macro_rules! bin_op_to_opcode {
+    ($op: expr) => {
+        match $op {
+            BinaryOp::And => Op::And,
+            crate::ast::BinaryOp::Or => Op::Or,
+            crate::ast::BinaryOp::Equal => Op::Equal,
+            crate::ast::BinaryOp::NotEqual => Op::NEqual,
+            crate::ast::BinaryOp::Less => Op::Less,
+            crate::ast::BinaryOp::Greater => Op::Greater,
+            crate::ast::BinaryOp::LessEqual => Op::LEqual,
+            crate::ast::BinaryOp::GreaterEqual => Op::GEqual,
+            crate::ast::BinaryOp::Add => Op::Add,
+            crate::ast::BinaryOp::Subtract => Op::Sub,
+            crate::ast::BinaryOp::Multiply => Op::Mul,
+            crate::ast::BinaryOp::Divide => Op::Div,
+            crate::ast::BinaryOp::Modulo => Op::Mod,
+        }
+    };
+}
+
 const BC_HEADER: &[u8] = b"PLIBCbeta"; /* pli bytecode signature */
 const CONST_POOL_LABEL: &[u8] = b"poolstartlabel"; /* constant pool start label */
 const SYMTAB_LABEL: &[u8] = b"symtabstartlabel"; /* symtab dtart label */
 
+/* code map */
+const PUSH_CONST: u8 = 0x01;
+const LOAD: u8       = 0x02;
+const STORE: u8      = 0x03;
+
+const ADD: u8        = 0x10;
+const SUB: u8        = 0x11;
+const MUL: u8        = 0x12;
+const DIV: u8        = 0x13;
+const MOD: u8        = 0x14;
+
+const EQUAL: u8      = 0x20;
+const N_EQUAL: u8    = 0x21;
+const LESS: u8       = 0x22;
+const GREATER: u8    = 0x23;
+const L_EQUAL: u8    = 0x24;
+const G_EQUAL: u8    = 0x25;
+
+const AND: u8        = 0x30;
+const OR: u8         = 0x31;
+const NOT: u8        = 0x32;
+const NEGATE: u8     = 0x33;
+
+const JUMP: u8           = 0x40;
+const JUMP_IF_FALSE: u8  = 0x41;
+const JUMP_IF_TRUE: u8   = 0x42;
+
+const PRINT_N: u8    = 0x50;
+const READ: u8       = 0x51;
+
+const POP: u8        = 0x60;
+const DUP: u8        = 0x61;
+const NOP: u8        = 0x62;
+const HALT: u8       = 0x63;
+
+use std::any::Any;
 use std::fs::File;
 use std::io::Write;
 
 use std::{fmt};
 use std::collections::HashMap;
 
-use crate::ast:: { LiteralValue, Program, Stmt, Stmt::VarDecl, Expr, Expr::Binary };
-
 /* opcode of bytecode */
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Op {
     // === Constants (index in constant pool) ===
     PushConst(u16),
@@ -47,11 +115,11 @@ pub enum Op {
 
     // === Сравнение: pop b, pop a, push bool ===
     Equal,
-    NotEqual,
+    NEqual,
     Less,
     Greater,
-    LessEqual,
-    GreaterEqual,
+    LEqual,
+    GEqual,
 
     // === Логика ===
     And, // short-circuit: JumpIfFalse для реализации
@@ -89,11 +157,11 @@ impl fmt::Display for Op {
             Op::Div => write!(f, "Div"),
             Op::Mod => write!(f, "Mod"),
             Op::Equal => write!(f, "Equal"),
-            Op::NotEqual => write!(f, "NotEqual"),
+            Op::NEqual => write!(f, "NotEqual"),
             Op::Less => write!(f, "Less"),
             Op::Greater => write!(f, "Greater"),
-            Op::LessEqual => write!(f, "LessEqual"),
-            Op::GreaterEqual => write!(f, "GreaterEqual"),
+            Op::LEqual => write!(f, "LessEqual"),
+            Op::GEqual => write!(f, "GreaterEqual"),
             Op::And => write!(f, "And"),
             Op::Or => write!(f, "Or"),
             Op::Not => write!(f, "Not"),
@@ -135,8 +203,17 @@ impl ByteCode {
 
     pub fn push_op(&mut self, op: Op) -> usize {
         let pos = self.ops.len();
-        self.ops.push(op);
-        
+
+        /* add operation to ops */
+        self.ops.push(op.clone());
+
+        /* write operation in file */
+        let result = self._write_op(op);
+        match result {
+            Ok(_) => {}
+            Err(e) => panic!("failed to write operation to plibc.plbc file: {}", e),
+        }
+
         pos
     }
 
@@ -189,6 +266,64 @@ impl ByteCode {
         }
     }
 
+    pub fn _write_op(&mut self, op: Op) -> std::io::Result<()> {
+        match op {
+            Op::PushConst(idx) => {
+                self.plibc_file.write_all(&[PUSH_CONST])?;
+                self.plibc_file.write_all(&idx.to_le_bytes())?;
+            }
+            Op::Load(idx) => {
+                self.plibc_file.write_all(&[LOAD])?;
+                self.plibc_file.write_all(&idx.to_le_bytes())?;
+            }
+            Op::Store(idx) => {
+                self.plibc_file.write_all(&[STORE])?;
+                self.plibc_file.write_all(&idx.to_le_bytes())?;
+            }
+            Op::Add => self.plibc_file.write_all(&[ADD])?,
+            Op::Sub => self.plibc_file.write_all(&[SUB])?,
+            Op::Mul => self.plibc_file.write_all(&[MUL])?,
+            Op::Div => self.plibc_file.write_all(&[DIV])?,
+            Op::Mod => self.plibc_file.write_all(&[MOD])?,
+            Op::Equal => self.plibc_file.write_all(&[EQUAL])?,
+            Op::NEqual => self.plibc_file.write_all(&[N_EQUAL])?,
+            Op::Less => self.plibc_file.write_all(&[LESS])?,
+            Op::Greater => self.plibc_file.write_all(&[GREATER])?,
+            Op::LEqual => self.plibc_file.write_all(&[L_EQUAL])?,
+            Op::GEqual => self.plibc_file.write_all(&[G_EQUAL])?,
+            Op::And => self.plibc_file.write_all(&[AND])?,
+            Op::Or => self.plibc_file.write_all(&[OR])?,
+            Op::Not => self.plibc_file.write_all(&[NOT])?,
+            Op::Negate => self.plibc_file.write_all(&[NEGATE])?,
+            Op::Jump(off) => {
+                self.plibc_file.write_all(&[JUMP])?;
+                self.plibc_file.write_all(&off.to_le_bytes())?;
+            }
+            Op::JumpIfFalse(off) => {
+                self.plibc_file.write_all(&[JUMP_IF_FALSE])?;
+                self.plibc_file.write_all(&off.to_le_bytes())?;
+            }
+            Op::JumpIfTrue(off) => {
+                self.plibc_file.write_all(&[JUMP_IF_TRUE])?;
+                self.plibc_file.write_all(&off.to_le_bytes())?;
+            }
+            Op::PrintN(n) => {
+                self.plibc_file.write_all(&[PRINT_N])?;
+                self.plibc_file.write_all(&[n])?;
+            }
+            Op::Read(idx) => {
+                self.plibc_file.write_all(&[READ])?;
+                self.plibc_file.write_all(&idx.to_le_bytes())?;
+            }
+            Op::Pop => self.plibc_file.write_all(&[POP])?,
+            Op::Dup => self.plibc_file.write_all(&[DUP])?,
+            Op::Nop => self.plibc_file.write_all(&[NOP])?,
+            Op::Halt => self.plibc_file.write_all(&[HALT])?,
+        }
+
+        Ok(())
+    }
+
     pub fn write_const_pool(&mut self) -> std::io::Result<()> {
         self.plibc_file.write_all(CONST_POOL_LABEL)?;
 
@@ -213,6 +348,28 @@ impl ByteCode {
                     self.plibc_file.write_all(bytes)?;
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    pub fn write_symtab(&mut self) -> std::io::Result<()> {
+        self.plibc_file.write_all(SYMTAB_LABEL)?;
+
+        let count = self.symtab.len() as u32;
+        self.plibc_file.write_all(&count.to_le_bytes())?;
+
+        // HashMap не гарантирует порядок: пишем стабильно по индексу слота.
+        let mut entries: Vec<(&String, &u16)> = self.symtab.iter().collect();
+        entries.sort_by_key(|(_, idx)| *idx);
+
+        for (name, idx) in entries {
+            let name_bytes = name.as_bytes();
+            let name_len = name_bytes.len() as u32;
+
+            self.plibc_file.write_all(&name_len.to_le_bytes())?;
+            self.plibc_file.write_all(name_bytes)?;
+            self.plibc_file.write_all(&idx.to_le_bytes())?;
         }
 
         Ok(())
@@ -284,6 +441,44 @@ impl Generator {
                 self.__process_var(&name);
             }
 
+            Expr::Unary { op, operand, line } => {
+                self._process_expr(operand);
+
+                match op {
+                    UnaryOp::Negate => {
+                        self.bytecode.push_op(Op::Negate);
+                    }
+
+                    UnaryOp::Not => {
+                        self.bytecode.push_op(Op::Not);
+                    }
+
+                    _ => {
+                        panic!("undefined unary operation! line: {line}");
+                    }      
+                }
+            }
+
+            Expr::Binary { op, left, right, line } => {
+                /* logic for optimizing the order of evaluation */
+                /* first of all, heavyweight expressions are evaluated, their result is placed on the stack */
+                if heavy_exp!(right.as_ref()) && simple_exp!(left.as_ref()) {
+                    self._process_expr(right.as_ref());
+                    self._process_expr(left.as_ref());    
+
+                    self.bytecode.push_op(bin_op_to_opcode!(op));
+                } else {
+                    self._process_expr(left.as_ref());
+                    self._process_expr(right.as_ref());    
+
+                    self.bytecode.push_op(bin_op_to_opcode!(op));
+                }
+            }
+
+            Expr::Grouping { expression, line } => {
+                self._process_expr(expression);
+            }
+
             _ => panic!("undefined expression type!")
         }
     }
@@ -309,6 +504,12 @@ impl Generator {
         match res {
             Ok(_) => {}
             Err(e) => panic!("failed to write const pool to plibc.plbc file: {}", e),
+        }
+
+        let res = self.bytecode.write_symtab();
+        match res {
+            Ok(_) => {}
+            Err(e) => panic!("failed to write symbol table to plibc.plbc file: {}", e),
         }
 
         self.bytecode

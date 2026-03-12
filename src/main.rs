@@ -68,6 +68,8 @@ fn main() -> ExitCode {
     /* clearing all c-memory allocated for c-token-stream and c-ast */
     unsafe { emergency_cleanup() } ;
 
+    //println!("{:#?}", program);
+
     let mut gener = Generator::new();
     gener.generate_bytecode(program);
 

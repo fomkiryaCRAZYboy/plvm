@@ -255,9 +255,9 @@ impl ByteCode {
         self._add_const(lit.clone())
     }
 
-    pub fn rewrite_jump(&mut self, pos: usize, target: usize) {
-        let offset = target as i16 - pos as i16;
-        match &mut self.ops[pos] {
+    pub fn rewrite_jump(&mut self, j_pos: usize, curr_pos: usize) {
+        let offset = curr_pos as i16 - j_pos as i16;
+        match &mut self.ops[j_pos] {
             Op::Jump(off)        |
             Op::JumpIfFalse(off) |
             Op::JumpIfTrue(off)  => *off = offset,
@@ -389,21 +389,39 @@ impl Generator {
     /* generate bytecode from ast */
     pub fn generate_bytecode(&mut self, ast: Program) {
         for stmt in ast.statements{
-            match stmt{
-                Stmt::VarDecl{var_name, initializer, line} => {
-                    self.process_var_decl(&var_name, &initializer, line);
-                }
-
-                Stmt::Assignment { var_name, value, line } => {
-                    self.process_assignment(&var_name, &value, line);
-                }
-
-                _ => panic!("undefined statement type!")
-            }
+            self.process_stmt(&stmt);
         }
     }
 
-    pub fn process_var_decl(&mut self, var_name: &str, initializer: &Expr, line: i32) {
+    pub fn process_stmt(&mut self, stmt: &Stmt) {
+        match stmt{
+            Stmt::VarDecl{var_name, initializer, line} => {
+                self.process_var_decl(&var_name, &initializer, *line);
+            }
+
+            Stmt::Assignment { var_name, value, line } => {
+                self.process_assignment(&var_name, &value, *line);
+            }
+
+            Stmt::If { condition, then_branch, else_branch, line } => {
+                self.process_if(&condition, then_branch.as_ref(), else_branch.as_deref(), *line);
+            }
+
+            Stmt::While { condition, body, line } => {
+                
+            }
+
+            Stmt::Block { statements, line } => {
+                for s in statements {
+                    self.process_stmt(s);
+                }
+            }
+
+            _ => panic!("undefined statement type!")
+        }
+    }
+
+    pub fn process_var_decl(&mut self, var_name: &String, initializer: &Expr, line: i32) {
         if self.bytecode.has_sym(&var_name){
             redecl!(line, var_name) /* panic! */
         }
@@ -414,7 +432,7 @@ impl Generator {
         self.bytecode.push_op(Op::Store(s_idx));
     }
 
-    pub fn process_assignment(&mut self, var_name: &str, value: &Expr, line: i32) {
+    pub fn process_assignment(&mut self, var_name: &String, value: &Expr, line: i32) {
         if !self.bytecode.has_sym(&var_name){
             missing_decl!(line, var_name) /* panic! */
         }
@@ -425,6 +443,36 @@ impl Generator {
         self.bytecode.push_op(Op::Store(s_idx));
     }
 
+    pub fn process_if(&mut self, condition: &Expr, then_branch: &Stmt, else_branch: Option<&Stmt>, line: i32) {
+        self._process_expr(condition);
+
+        if let Some(else_stmt) = else_branch {
+            /* processing with else-branch */
+
+            let jfalse_pos = self.bytecode.push_op(Op::JumpIfFalse(0));
+
+            self.process_stmt(then_branch);
+            let j_after_true_pos = self.bytecode.push_op(Op::Jump(0));
+
+            self.bytecode.rewrite_jump(jfalse_pos, j_after_true_pos + 1);
+
+            self.process_stmt(else_stmt);
+            let curr_pos = self.bytecode.ops.len();
+
+            self.bytecode.rewrite_jump(j_after_true_pos, curr_pos);
+        }
+        else {
+            /* processing without else-branch */
+
+            let jfalse_pos = self.bytecode.push_op(Op::JumpIfFalse(0));
+
+            self.process_stmt(then_branch);
+
+            let curr_pos = self.bytecode.ops.len();
+
+            self.bytecode.rewrite_jump(jfalse_pos, curr_pos);
+        }
+    }
 
     /* add a set of operations representing an expression to bytecode */
     fn _process_expr(&mut self, expr: &Expr) {

@@ -3,6 +3,7 @@ use std::os::raw::c_char as raw_c_char;
 
 use crate::ast::{BinaryOp, Expr, LiteralValue, Program, Stmt, UnaryOp};
 
+#[allow(non_upper_case_globals, non_camel_case_types, dead_code)]
 mod c_ast {
     include!(concat!(env!("OUT_DIR"), "/c_ast_binds.rs"));
 }

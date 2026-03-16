@@ -16,7 +16,7 @@ macro_rules! redecl {
     };
 }
 
-use crate::ast:: { LiteralValue, Program, Stmt, Stmt::VarDecl, Expr, Expr::Binary, BinaryOp ,BinaryOp::*, UnaryOp, UnaryOp::* };
+use crate::ast:: { LiteralValue, Program, Stmt, Expr, BinaryOp, UnaryOp };
 
 macro_rules! simple_exp {
     ($e: expr) => {
@@ -50,11 +50,16 @@ macro_rules! bin_op_to_opcode {
     };
 }
 
-const BC_HEADER: &[u8] = b"PLIBCbeta"; /* pli bytecode signature */
-const CONST_POOL_LABEL: &[u8] = b"poolstartlabel"; /* constant pool start label */
-const SYMTAB_LABEL: &[u8] = b"symtabstartlabel"; /* symtab dtart label */
+/** PLI bytecode file signature. */
+const BC_HEADER: &[u8] = b"PLIBCbeta";
 
-/* code map */
+/** Constant pool section label. */
+const CONST_POOL_LABEL: &[u8] = b"poolstartlabel";
+
+/** Symbol table section label. */
+const SYMTAB_LABEL: &[u8] = b"symtabstartlabel";
+
+/** Opcode map: byte codes for each instruction in the binary format. */
 const PUSH_CONST: u8 = 0x01;
 const LOAD: u8       = 0x02;
 const STORE: u8      = 0x03;
@@ -89,31 +94,33 @@ const DUP: u8        = 0x61;
 const NOP: u8        = 0x62;
 const HALT: u8       = 0x63;
 
-use std::any::Any;
 use std::fs::File;
 use std::io::Write;
 
 use std::{fmt};
 use std::collections::HashMap;
 
-/* opcode of bytecode */
+/**
+ * Bytecode opcodes for the PLI VM.
+ * Stack convention: [...] — top on the right.
+ */
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Op {
-    // === Constants (index in constant pool) ===
+    /** Constants: index into constant pool. */
     PushConst(u16),
 
-    // === Variables (index in symbol table) ===
-    Load(u16),  // push vars[idx]
-    Store(u16), // pop -> vars[idx]
+    /** Variables: index into symbol table. */
+    Load(u16),  /* push vars[idx] */
+    Store(u16), /* pop -> vars[idx] */
 
-    // === Арифметика: pop b, pop a, push result ===
+    /** Arithmetic: pop b, pop a, push result. */
     Add,
     Sub,
     Mul,
     Div,
     Mod,
 
-    // === Сравнение: pop b, pop a, push bool ===
+    /** Comparison: pop b, pop a, push bool. */
     Equal,
     NEqual,
     Less,
@@ -121,26 +128,26 @@ pub enum Op {
     LEqual,
     GEqual,
 
-    // === Логика ===
-    And, // short-circuit: JumpIfFalse для реализации
-    Or,  // short-circuit: JumpIfTrue для реализации
-    Not, // pop a, push !a
+    /** Logic. And/Or use short-circuit via JumpIfFalse/JumpIfTrue. */
+    And,
+    Or,
+    Not, /* pop a, push !a */
 
-    // === Унарные ===
-    Negate, // pop a, push -a
+    /** Unary. */
+    Negate, /* pop a, push -a */
 
-    // === Управление потоком (смещение в байтах/инструкциях) ===
-    Jump(i16),        // безусловный переход
-    JumpIfFalse(i16), // pop; если false — jump (для if, and)
-    JumpIfTrue(i16),  // pop; если true — jump (для or)
+    /** Control flow: offset = number of instructions to skip. */
+    Jump(i16),        /* unconditional jump */
+    JumpIfFalse(i16), /* pop; if false — jump (for if, and) */
+    JumpIfTrue(i16),  /* pop; if true — jump (for or) */
 
-    // === Ввод-вывод ===
-    PrintN(u8), // pop N значений, напечатать (print(expr, expr, ...))
-    Read(u16),  // прочитать, store в vars[idx] (read(x))
+    /** I/O. */
+    PrintN(u8), /* pop N values, print (print(expr, expr, ...)) */
+    Read(u16),  /* read input, store into vars[idx] (read(x)) */
 
-    // === Служебные ===
-    Pop,  // снять вершину стека
-    Dup,  // дублировать вершину
+    /** Utility. */
+    Pop,  /* pop top of stack */
+    Dup,  /* duplicate top */
     Nop,
     Halt,
 }
@@ -179,11 +186,14 @@ impl fmt::Display for Op {
     }
 }
 
-/* bytecode - operations list and map of variables */
+/**
+ * Bytecode: instruction stream, symbol table, and constant pool.
+ */
 #[derive(Debug)]
 pub struct ByteCode {
     pub ops: Vec<Op>,
-    pub symtab: HashMap<String, u16>, /* varname: key */
+    /** varname -> slot index */
+    pub symtab: HashMap<String, u16>,
     pub const_pool: Vec<LiteralValue>,
     pub plibc_file: File
 }
@@ -204,10 +214,10 @@ impl ByteCode {
     pub fn push_op(&mut self, op: Op) -> usize {
         let pos = self.ops.len();
 
-        /* add operation to ops */
+        /* Add operation to ops. */
         self.ops.push(op.clone());
 
-        /* write operation in file */
+        /* Write operation to file. */
         let result = self._write_op(op);
         match result {
             Ok(_) => {}
@@ -255,13 +265,17 @@ impl ByteCode {
         self._add_const(lit.clone())
     }
 
-    pub fn rewrite_jump(&mut self, j_pos: usize, curr_pos: usize) {
-        let offset = curr_pos as i16 - j_pos as i16;
+    /**
+     * Writes the offset for Jump/JumpIfFalse/JumpIfTrue.
+     * offset = number of instructions to skip forward.
+     * VM: new_ip = pos + 1 + offset (skip the jump instruction itself + offset instructions).
+     */
+    pub fn rewrite_jump(&mut self, j_pos: usize, target_pos: usize) {
+        let offset = (target_pos as i16) - (j_pos as i16) - 1;
         match &mut self.ops[j_pos] {
             Op::Jump(off)        |
             Op::JumpIfFalse(off) |
             Op::JumpIfTrue(off)  => *off = offset,
-            
             _ => {}
         }
     }
@@ -359,7 +373,7 @@ impl ByteCode {
         let count = self.symtab.len() as u32;
         self.plibc_file.write_all(&count.to_le_bytes())?;
 
-        // HashMap не гарантирует порядок: пишем стабильно по индексу слота.
+        /* HashMap does not guarantee order: write stably by slot index. */
         let mut entries: Vec<(&String, &u16)> = self.symtab.iter().collect();
         entries.sort_by_key(|(_, idx)| *idx);
 
@@ -386,7 +400,7 @@ impl Generator {
         Self { bytecode: ByteCode::new() }  
    }
 
-    /* generate bytecode from ast */
+    /** Generate bytecode from AST. */
     pub fn generate_bytecode(&mut self, ast: Program) {
         for stmt in ast.statements{
             self.process_stmt(&stmt);
@@ -404,11 +418,11 @@ impl Generator {
             }
 
             Stmt::If { condition, then_branch, else_branch, line } => {
-                self.process_if(&condition, then_branch.as_ref(), else_branch.as_deref(), *line);
+                self.process_if(condition, then_branch.as_ref(), else_branch.as_deref(), *line);
             }
 
             Stmt::While { condition, body, line } => {
-                
+                self.process_while(condition, body);
             }
 
             Stmt::Block { statements, line } => {
@@ -423,7 +437,7 @@ impl Generator {
 
     pub fn process_var_decl(&mut self, var_name: &String, initializer: &Expr, line: i32) {
         if self.bytecode.has_sym(&var_name){
-            redecl!(line, var_name) /* panic! */
+            redecl!(line, var_name) /* panics */
         }
     
         self._process_expr(&initializer);
@@ -434,7 +448,7 @@ impl Generator {
 
     pub fn process_assignment(&mut self, var_name: &String, value: &Expr, line: i32) {
         if !self.bytecode.has_sym(&var_name){
-            missing_decl!(line, var_name) /* panic! */
+            missing_decl!(line, var_name) /* panics */
         }
 
         self._process_expr(&value);
@@ -443,12 +457,15 @@ impl Generator {
         self.bytecode.push_op(Op::Store(s_idx));
     }
 
+    /**
+     * if (cond) { then } else { else }
+     * Layout: cond | JumpIfFalse(→else) | then | Jump(→after) | else | after
+     * offset = number of instructions forward: new_ip = pos + 1 + offset
+     */
     pub fn process_if(&mut self, condition: &Expr, then_branch: &Stmt, else_branch: Option<&Stmt>, line: i32) {
         self._process_expr(condition);
 
         if let Some(else_stmt) = else_branch {
-            /* processing with else-branch */
-
             let jfalse_pos = self.bytecode.push_op(Op::JumpIfFalse(0));
 
             self.process_stmt(then_branch);
@@ -457,24 +474,41 @@ impl Generator {
             self.bytecode.rewrite_jump(jfalse_pos, j_after_true_pos + 1);
 
             self.process_stmt(else_stmt);
+
             let curr_pos = self.bytecode.ops.len();
-
             self.bytecode.rewrite_jump(j_after_true_pos, curr_pos);
-        }
-        else {
-            /* processing without else-branch */
-
+        } else {
             let jfalse_pos = self.bytecode.push_op(Op::JumpIfFalse(0));
 
             self.process_stmt(then_branch);
 
             let curr_pos = self.bytecode.ops.len();
-
             self.bytecode.rewrite_jump(jfalse_pos, curr_pos);
         }
     }
 
-    /* add a set of operations representing an expression to bytecode */
+    /**
+     * while (cond) { body }
+     * Layout: loop_start: cond | JumpIfFalse(→exit) | body | Jump(→loop_start) | exit
+     */
+    pub fn process_while(&mut self, condition: &Expr, body: &Stmt) {
+        let loop_start = self.bytecode.ops.len();
+
+        self._process_expr(condition);
+
+        let jfalse_pos = self.bytecode.push_op(Op::JumpIfFalse(0));
+
+        self.process_stmt(body);
+
+        let j_after_body_pos = self.bytecode.push_op(Op::Jump(0));
+
+        let exit_pos = self.bytecode.ops.len();
+
+        self.bytecode.rewrite_jump(jfalse_pos, exit_pos);
+        self.bytecode.rewrite_jump(j_after_body_pos, loop_start);
+    }
+
+    /** Add a sequence of operations representing an expression to bytecode. */
     fn _process_expr(&mut self, expr: &Expr) {
         match expr{
             Expr::Literal { value, line } => {
@@ -483,7 +517,7 @@ impl Generator {
 
             Expr::Variable { name, line } => {
                 if !self.bytecode.has_sym(&name) {
-                    missing_decl!(line, name) /* panic! */
+                    missing_decl!(line, name) /* panics */
                 }
 
                 self.__process_var(&name);
@@ -508,8 +542,10 @@ impl Generator {
             }
 
             Expr::Binary { op, left, right, line } => {
-                /* logic for optimizing the order of evaluation */
-                /* first of all, heavyweight expressions are evaluated, their result is placed on the stack */
+                /*
+                 * Optimize evaluation order: evaluate heavyweight expressions first,
+                 * place their result on the stack, then lightweight ones.
+                 */
                 if heavy_exp!(right.as_ref()) && simple_exp!(left.as_ref()) {
                     self._process_expr(right.as_ref());
                     self._process_expr(left.as_ref());    
@@ -532,18 +568,18 @@ impl Generator {
     }
 
     fn __process_literal(&mut self, lit: &LiteralValue) {
-        /* add constant to pool if it isn`t already exists */
+        /* Add constant to pool if it does not already exist. */
         let c_idx = self.bytecode.get_or_add_const(&lit);
 
-        /* push literal on top of stack */
+        /* Push literal on top of stack. */
         self.bytecode.push_op(Op::PushConst(c_idx));
     }
 
     fn __process_var(&mut self, var_name: &str) {
-        /* get the var idx */
+        /* Get the variable slot index. */
         let s_idx = self.bytecode.get_or_add_sym(var_name.to_string());
 
-        /* 'push' variable on top of stack */
+        /* Push variable value on top of stack. */
         self.bytecode.push_op(Op::Load(s_idx));
     }
 

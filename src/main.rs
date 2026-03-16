@@ -7,7 +7,7 @@ mod jit;
 use jit::{ jit_compile, JitFn };
 
 mod bytecode_gen;
-use bytecode_gen::{ Generator , ByteCode };
+use bytecode_gen::{ Generator };
 
 mod ast; /* ast types converted from from pli/include/parser.h */
 use ast::Program;

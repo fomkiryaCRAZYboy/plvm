@@ -1,7 +1,11 @@
+use std::env;
 use std::ffi::CString;
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::os::raw::c_char;
+use std::path::Path;
 use std::process::ExitCode;
+
+mod vm;
 
 mod jit;
 use jit::{ jit_compile, JitFn };
@@ -29,7 +33,7 @@ fn read_interactive() -> CString {
     lnum += 1;
 
     for line in stdin.lock().lines() {
-        let line = line.expect("ошибка чтения stdin");
+        let line = line.expect("failed to read stdin");
 
         if line.trim().is_empty() && !program.is_empty() {
             break;
@@ -43,7 +47,19 @@ fn read_interactive() -> CString {
         lnum += 1;
     }
 
-    CString::new(program).expect("код программы содержит нулевой байт")
+    CString::new(program).expect("program contains null byte")
+}
+
+fn read_from_file(path: impl AsRef<Path>) -> io::Result<CString> {
+    let program = std::fs::read_to_string(path)?;
+    CString::new(program).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "file contains null byte"))
+}
+
+/** Read full stdin until EOF (for piped input, e.g. echo "print(1)" | vm -). */
+fn read_from_stdin() -> io::Result<CString> {
+    let mut program = String::new();
+    io::stdin().read_to_string(&mut program)?;
+    CString::new(program).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "program contains null byte"))
 }
 
 fn main() -> ExitCode {
@@ -53,7 +69,17 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let code = read_interactive();
+    let code = match env::args().nth(1).as_deref() {
+        Some("-") | Some("--stdin") => read_from_stdin().expect("failed to read stdin"),
+        Some(path) => match read_from_file(path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("failed to read {}: {}", path, e);
+                return ExitCode::FAILURE;
+            }
+        },
+        None => read_interactive(),
+    };
 
     /* getting raw pointer leading to c-ast */
     let ast_ptr = unsafe { get_ast(code.as_ptr() as *mut c_char) };

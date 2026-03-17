@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PLI Online IDE</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+      background: #1e1e2e;
+      color: #cdd6f4;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 0.75rem 1.5rem;
+      background: #181825;
+      border-bottom: 1px solid #313244;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #89b4fa;
+    }
+    #run-btn {
+      padding: 0.5rem 1.25rem;
+      font-family: inherit;
+      font-size: 0.9rem;
+      background: #89b4fa;
+      color: #1e1e2e;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    #run-btn:hover {
+      background: #b4befe;
+    }
+    #run-btn:active {
+      transform: scale(0.98);
+    }
+    #run-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
+      gap: 1px;
+      background: #313244;
+      padding: 1px;
+    }
+    @media (max-width: 768px) {
+      main { grid-template-columns: 1fr; grid-template-rows: auto auto; }
+    }
+    .panel {
+      display: flex;
+      flex-direction: column;
+      background: #1e1e2e;
+      min-height: 200px;
+    }
+    .panel-header {
+      padding: 0.5rem 1rem;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #6c7086;
+      background: #181825;
+      border-bottom: 1px solid #313244;
+    }
+    #editor {
+      flex: 1;
+      width: 100%;
+      padding: 1rem;
+      font-family: inherit;
+      font-size: 0.9rem;
+      line-height: 1.5;
+      background: #1e1e2e;
+      color: #cdd6f4;
+      border: none;
+      resize: none;
+      outline: none;
+    }
+    #editor::placeholder {
+      color: #6c7086;
+    }
+    #output {
+      flex: 1;
+      width: 100%;
+      padding: 1rem;
+      font-family: inherit;
+      font-size: 0.9rem;
+      line-height: 1.5;
+      background: #11111b;
+      color: #a6e3a1;
+      border: none;
+      resize: none;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    #output.error {
+      color: #f38ba8;
+    }
+    #output.empty {
+      color: #6c7086;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>PLI Online IDE</h1>
+    <button id="run-btn" type="button">Запустить</button>
+  </header>
+  <main>
+    <div class="panel">
+      <div class="panel-header">Код</div>
+      <textarea id="editor" placeholder="print(&quot;Hello, PLI!&quot;)&#10;var x = 10&#10;print(x + 5)" spellcheck="false"></textarea>
+    </div>
+    <div class="panel">
+      <div class="panel-header">Вывод (stdout / stderr)</div>
+      <pre id="output" class="empty">Вывод программы появится здесь.</pre>
+    </div>
+  </main>
+  <script>
+    const editor = document.getElementById('editor');
+    const output = document.getElementById('output');
+    const runBtn = document.getElementById('run-btn');
+
+    runBtn.addEventListener('click', async () => {
+      const code = editor.value;
+      output.classList.remove('empty', 'error');
+      output.textContent = 'Запуск...';
+      runBtn.disabled = true;
+
+      try {
+        const res = await fetch('/api/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code, input: '' })
+        });
+        const raw = await res.text();
+        let data;
+        try {
+          data = raw ? JSON.parse(raw) : {};
+        } catch (_) {
+          output.textContent = res.ok
+            ? raw
+            : 'Backend не найден (404).\n\nЗапустите: cargo run --bin ide';
+          output.classList.add('error');
+          return;
+        }
+        if (res.ok) {
+          const text = (data.stdout || '') + (data.stderr ? '\n' + data.stderr : '');
+          output.textContent = text || '(пусто)';
+          if (data.stderr) output.classList.add('error');
+        } else {
+          output.textContent = data.error || 'Ошибка';
+          output.classList.add('error');
+        }
+      } catch (e) {
+        output.textContent = 'Ошибка: ' + e.message + '\n\nУбедитесь, что backend запущен (cargo run --bin ide).';
+        output.classList.add('error');
+      } finally {
+        runBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

@@ -34,18 +34,18 @@ macro_rules! bin_op_to_opcode {
     ($op: expr) => {
         match $op {
             BinaryOp::And => Op::And,
-            crate::ast::BinaryOp::Or => Op::Or,
-            crate::ast::BinaryOp::Equal => Op::Equal,
-            crate::ast::BinaryOp::NotEqual => Op::NEqual,
-            crate::ast::BinaryOp::Less => Op::Less,
-            crate::ast::BinaryOp::Greater => Op::Greater,
-            crate::ast::BinaryOp::LessEqual => Op::LEqual,
-            crate::ast::BinaryOp::GreaterEqual => Op::GEqual,
-            crate::ast::BinaryOp::Add => Op::Add,
-            crate::ast::BinaryOp::Subtract => Op::Sub,
-            crate::ast::BinaryOp::Multiply => Op::Mul,
-            crate::ast::BinaryOp::Divide => Op::Div,
-            crate::ast::BinaryOp::Modulo => Op::Mod,
+            BinaryOp::Or => Op::Or,
+            BinaryOp::Equal => Op::Equal,
+            BinaryOp::NotEqual => Op::NEqual,
+            BinaryOp::Less => Op::Less,
+            BinaryOp::Greater => Op::Greater,
+            BinaryOp::LessEqual => Op::LEqual,
+            BinaryOp::GreaterEqual => Op::GEqual,
+            BinaryOp::Add => Op::Add,
+            BinaryOp::Subtract => Op::Sub,
+            BinaryOp::Multiply => Op::Mul,
+            BinaryOp::Divide => Op::Div,
+            BinaryOp::Modulo => Op::Mod,
         }
     };
 }
@@ -431,7 +431,13 @@ impl Generator {
                 }
             }
 
-            _ => panic!("undefined statement type!")
+            Stmt::Print { expressions, line } => {
+                self.process_print(expressions);
+            }
+
+            Stmt::Read { var_name, line } => {
+                self.process_read(var_name);
+            }
         }
     }
 
@@ -506,6 +512,22 @@ impl Generator {
 
         self.bytecode.rewrite_jump(jfalse_pos, exit_pos);
         self.bytecode.rewrite_jump(j_after_body_pos, loop_start);
+    }
+
+    /**
+     * print(expr1, expr2, ...) — evaluate in reverse order so that
+     * PrintN pops left-to-right: first expr's result on top of stack.
+     */
+    pub fn process_print(&mut self, expressions: &[Expr]) {
+        for expr in expressions.iter().rev() {
+            self._process_expr(expr);
+        }
+        self.bytecode.push_op(Op::PrintN(expressions.len() as u8));
+    }
+
+    pub fn process_read(&mut self, var_name: &String) {
+        let s_idx = self.bytecode.get_or_add_sym(var_name.to_string());
+        self.bytecode.push_op(Op::Read(s_idx));
     }
 
     /** Add a sequence of operations representing an expression to bytecode. */

@@ -1,10 +1,18 @@
 [package]
 name = "vm"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+
+[[bin]]
+name = "ide"
+path = "src/bin/ide.rs"
 
 [dependencies]
 memmap2 = "0.9.10"
+axum = { version = "0.7", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.5", features = ["fs"] }
+serde = { version = "1", features = ["derive"] }
 
 [build-dependencies]
 bindgen = "0.72.1"

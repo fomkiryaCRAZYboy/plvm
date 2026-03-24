@@ -6,6 +6,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 mod vm;
+use vm::exec;
 
 mod jit;
 use jit::{ jit_compile, JitFn };
@@ -100,7 +101,9 @@ fn main() -> ExitCode {
     gener.generate_bytecode(program);
 
     let bytecode = gener.finish();
-    println!("{:#?}", bytecode);
+    //println!("{:#?}", bytecode);
+
+    exec(bytecode);
 
     ExitCode::SUCCESS
 }
